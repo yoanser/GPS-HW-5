@@ -1,0 +1,78 @@
+clear;
+clc;
+close all;
+
+c = 299792458; %m/s , speed of light
+NIST_ECEF = [-1288398.567 -4721696.932	4078625.350]; %Nist ecef location
+
+%% Question 1 Analayzing Multiple PRN Satellites
+
+PRN = [3; 4; 7; 8; 9; 16; 26; 27; 31];
+
+%Read in rinex file
+fileinfo = rinexinfo('NIST00USA_R_20262310000_01D_30S_MO.rnx');
+GPS_Data = rinexread('NIST00USA_R_20262310000_01D_30S_MO.rnx');
+%Read ephemeris values
+
+[gps_ephem,ionoparams] = read_clean_GPSbroadcast('brdc2310.26n');
+
+%Create seperate data files for each satellite and do all the calculations!
+for i = 1:length(PRN)
+ PRNUM = sprintf('PRN_%d', PRN(i));
+dataPRN.(PRNUM) = GPS_Data.GPS(GPS_Data.GPS.SatelliteID == PRN(i), :); %Filter for ith PRN data
+[wn.(PRNUM),tow.(PRNUM) ,~] = cal2gps(dataPRN.(PRNUM).Time);
+timestep = seconds(30);
+
+%Filtering, fill in spots that satellites isnt visible with NANS to make
+%plots more accurate
+%dataPRN.(dynamicName) = retime(dataPRN.(dynamicName),'regular', 'fillwithmissing', 'TimeStep', timestep);
+
+%Find iono range at first epoch
+PIF(i,:) = ionocorr(dataPRN.(PRNUM).C1C(1), 1575.42e6, dataPRN.(PRNUM).C2W(1), 1227.60e6);
+
+%Find expected range
+expectedRange(i,:) = findExpectedRange(NIST_ECEF,tow.(PRNUM)(1),wn.(PRNUM)(1),gps_ephem,PRN(i));
+
+%Find expected elevation and azmiuth
+%read ephemeris data for each satellite and get clock correction!
+[~,satPos.(PRNUM),~,bsv(i,:),relCorr(i,:),~,~] = eph2pvt2025(gps_ephem,[wn.(PRNUM)(1) tow.(PRNUM)(1)],PRN(i));
+
+%Find Azmiuth and Elevation
+[AZ(i,:), EL(i,:), ~] = compute_azelrange(NIST_ECEF,satPos.(PRNUM));
+
+
+%Find tropospheric correction (Assuming Zd = 2m again!)
+tropo(i,:) = tropomodel(2,EL(i,:));
+
+
+end
+
+%Create a beutiful table for question 1\
+
+resultsTable = table(PRN, PIF, expectedRange, AZ, EL, bsv, relCorr, tropo, ...
+    'VariableNames', {'PRN','PIF (m)','ExpectedRange (m)','AZ (deg)','Elevation (deg)','BSV (m)','RELAT (m)','TROP (m)'});
+disp(resultsTable);
+
+%% Question 2
+
+prefitResid = PIF - (expectedRange - bsv - relCorr + tropo)
+
+
+for i = 1:length(PRN)
+PRNUM = sprintf('PRN_%d', PRN(i));
+%Find G
+G(i,:) = [-(satPos.(PRNUM)(1) - NIST_ECEF(1))./ expectedRange(i), -(satPos.(PRNUM)(2) - NIST_ECEF(2))./ expectedRange(i),   ...
+     -(satPos.(PRNUM)(3) - NIST_ECEF(3))./ expectedRange(i), 1];
+
+end
+
+
+%Error 
+solutionmaybe = inv(G'*G)*G'*prefitResid
+
+
+postfitResid = prefitResid - G*solutionmaybe
+
+
+
+
