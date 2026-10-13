@@ -1,0 +1,80 @@
+clear;
+clc;
+close all;
+
+c = 299792458; %m/s , speed of light
+NIST_ECEF = [-1288398.567 -4721696.932	4078625.350]; %Nist ecef location
+
+%% Question 1 Analayzing Multiple PRN Satellites
+
+PRN = [3; 4; 7; 8; 9; 16; 26; 27; 31];
+
+%Read in rinex file
+fileinfo = rinexinfo('NIST00USA_R_20262310000_01D_30S_MO.rnx');
+GPS_Data = rinexread('NIST00USA_R_20262310000_01D_30S_MO.rnx');
+%Read ephemeris values
+
+[gps_ephem,ionoparams] = read_clean_GPSbroadcast('brdc2310.26n');
+
+%% Question 3
+
+ECEFGuess = lla2ecef([40 -105 1600])
+
+guessStraightLineError = norm(ECEFGuess - NIST_ECEF) %Straght line error in meters
+
+
+%Create seperate data files for each satellite and do all the calculations!
+for i = 1:length(PRN)
+    PRNUM = sprintf('PRN_%d', PRN(i));
+    dataPRN.(PRNUM) = GPS_Data.GPS(GPS_Data.GPS.SatelliteID == PRN(i), :); %Filter for ith PRN data
+    [wn.(PRNUM),tow.(PRNUM) ,~] = cal2gps(dataPRN.(PRNUM).Time);
+    timestep = seconds(30);
+
+    %Filtering, fill in spots that satellites isnt visible with NANS to make
+    %plots more accurate
+    %dataPRN.(dynamicName) = retime(dataPRN.(dynamicName),'regular', 'fillwithmissing', 'TimeStep', timestep);
+
+    %Find iono range at first epoch
+    PIF3b(i,:) = ionocorr(dataPRN.(PRNUM).C1C(1), 1575.42e6, dataPRN.(PRNUM).C2W(1), 1227.60e6);
+
+    %Find expected range
+    expectedRange3b(i,:) = findExpectedRange(ECEFGuess,tow.(PRNUM)(1),wn.(PRNUM)(1),gps_ephem,PRN(i));
+
+    %Find expected elevation and azmiuth
+    %read ephemeris data for each satellite and get clock correction!
+    [~,satPos3b.(PRNUM),~,bsv3b(i,:),relCorr3b(i,:),~,~] = eph2pvt2025(gps_ephem,[wn.(PRNUM)(1) tow.(PRNUM)(1)],PRN(i));
+
+    %Find Azmiuth and Elevation
+    [AZ3b(i,:), EL3b(i,:), ~] = compute_azelrange(ECEFGuess,satPos3b.(PRNUM));
+
+
+    %Find tropospheric correction (Assuming Zd = 2m again!)
+    tropo3b(i,:) = tropomodel(2,EL3b(i,:));
+
+
+end
+
+resultsTable3b = table(PRN, PIF3b, expectedRange3b, AZ3b, EL3b, bsv3b, relCorr3b, tropo3b, ...
+    'VariableNames', {'PRN','PIF (m)','ExpectedRange (m)','AZ (deg)','Elevation (deg)','BSV (m)','RELAT (m)','TROP (m)'});
+disp(resultsTable3b);
+
+prefitResid3b = PIF3b - (expectedRange3b - bsv3b - relCorr3b + tropo3b)
+
+for i = 1:length(PRN)
+    PRNUM = sprintf('PRN_%d', PRN(i));
+    %Find G
+    G3b(i,:) = [-(satPos3b.(PRNUM)(1) - ECEFGuess(1))./ expectedRange3b(i), -(satPos3b.(PRNUM)(2) - ECEFGuess(2))./ expectedRange3b(i),   ...
+        -(satPos3b.(PRNUM)(3) - ECEFGuess(3))./ expectedRange3b(i), 1];
+
+end
+
+
+%Error 
+solutionQuestion3c = inv(G3b'*G3b)*G3b'*prefitResid3b
+
+
+postfitResid = prefitResid3b - G3b*solutionQuestion3c
+
+updatedGuess = ECEFGuess + solutionQuestion3c(1:3)'
+
+newError = norm(updatedGuess-NIST_ECEF)
