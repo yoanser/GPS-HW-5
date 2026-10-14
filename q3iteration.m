@@ -17,16 +17,22 @@ GPS_Data = rinexread('NIST00USA_R_20262310000_01D_30S_MO.rnx');
 [gps_ephem,ionoparams] = read_clean_GPSbroadcast('brdc2310.26n');
 
 %% Question 3
-
 ECEFGuess = lla2ecef([40 -105 1600])
 
 guessStraightLineError = norm(ECEFGuess - NIST_ECEF) %Straght line error in meters
 
+i=0; %Init counter
+
+while true
+
+i = i+1
+
+
 
 %Create seperate data files for each satellite and do all the calculations!
-for i = 1:length(PRN)
-    PRNUM = sprintf('PRN_%d', PRN(i));
-    dataPRN.(PRNUM) = GPS_Data.GPS(GPS_Data.GPS.SatelliteID == PRN(i), :); %Filter for ith PRN data
+for k = 1:length(PRN)
+    PRNUM = sprintf('PRN_%d', PRN(k));
+    dataPRN.(PRNUM) = GPS_Data.GPS(GPS_Data.GPS.SatelliteID == PRN(k), :); %Filter for ith PRN data
     [wn.(PRNUM),tow.(PRNUM) ,~] = cal2gps(dataPRN.(PRNUM).Time);
     timestep = seconds(30);
 
@@ -35,21 +41,21 @@ for i = 1:length(PRN)
     %dataPRN.(dynamicName) = retime(dataPRN.(dynamicName),'regular', 'fillwithmissing', 'TimeStep', timestep);
 
     %Find iono range at first epoch
-    PIF3b(i,:) = ionocorr(dataPRN.(PRNUM).C1C(1), 1575.42e6, dataPRN.(PRNUM).C2W(1), 1227.60e6);
+    PIF3b(k,:) = ionocorr(dataPRN.(PRNUM).C1C(1), 1575.42e6, dataPRN.(PRNUM).C2W(1), 1227.60e6);
 
     %Find expected range
-    expectedRange3b(i,:) = findExpectedRange(ECEFGuess,tow.(PRNUM)(1),wn.(PRNUM)(1),gps_ephem,PRN(i));
+    expectedRange3b(k,:) = findExpectedRange(ECEFGuess(i,:),tow.(PRNUM)(1),wn.(PRNUM)(1),gps_ephem,PRN(k));
 
     %Find expected elevation and azmiuth
     %read ephemeris data for each satellite and get clock correction!
-    [~,satPos3b.(PRNUM),~,bsv3b(i,:),relCorr3b(i,:),~,~] = eph2pvt2025(gps_ephem,[wn.(PRNUM)(1) tow.(PRNUM)(1)],PRN(i));
+    [~,satPos3b.(PRNUM),~,bsv3b(k,:),relCorr3b(k,:),~,~] = eph2pvt2025(gps_ephem,[wn.(PRNUM)(1) tow.(PRNUM)(1)],PRN(k));
 
     %Find Azmiuth and Elevation
-    [AZ3b(i,:), EL3b(i,:), ~] = compute_azelrange(ECEFGuess,satPos3b.(PRNUM));
+    [AZ3b(k,:), EL3b(k,:), ~] = compute_azelrange(ECEFGuess(i,:),satPos3b.(PRNUM));
 
 
     %Find tropospheric correction (Assuming Zd = 2m again!)
-    tropo3b(i,:) = tropomodel(2,EL3b(i,:));
+    tropo3b(k,:) = tropomodel(2,EL3b(k,:));
 
 
 end
@@ -60,11 +66,11 @@ disp(resultsTable3b);
 
 prefitResid3b = PIF3b - (expectedRange3b - bsv3b - relCorr3b + tropo3b)
 
-for i = 1:length(PRN)
-    PRNUM = sprintf('PRN_%d', PRN(i));
+for j = 1:length(PRN)
+    PRNUM = sprintf('PRN_%d', PRN(j));
     %Find G
-    G3b(i,:) = [-(satPos3b.(PRNUM)(1) - ECEFGuess(1))./ expectedRange3b(i), -(satPos3b.(PRNUM)(2) - ECEFGuess(2))./ expectedRange3b(i),   ...
-        -(satPos3b.(PRNUM)(3) - ECEFGuess(3))./ expectedRange3b(i), 1];
+    G3b(j,:) = [-(satPos3b.(PRNUM)(1) - ECEFGuess(i,1))./ expectedRange3b(j), -(satPos3b.(PRNUM)(2) - ECEFGuess(i,2))./ expectedRange3b(j),   ...
+        -(satPos3b.(PRNUM)(3) - ECEFGuess(i,3))./ expectedRange3b(j), 1];
 
 end
 
@@ -75,6 +81,14 @@ solutionQuestion3c = inv(G3b'*G3b)*G3b'*prefitResid3b
 
 postfitResid = prefitResid3b - G3b*solutionQuestion3c
 
-updatedGuess = ECEFGuess + solutionQuestion3c(1:3)'
+ECEFGuess(i+1,:) = ECEFGuess(i,:) + (solutionQuestion3c(1:3))'
 
-newError = norm(updatedGuess-NIST_ECEF)
+newError(i) = norm(ECEFGuess(i+1,:)-NIST_ECEF)
+
+if norm(solutionQuestion3c(1:3))<0.01 %Breaks while loop if error state vector is less than 1m
+    break
+end
+
+
+
+end
