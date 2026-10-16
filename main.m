@@ -8,7 +8,6 @@ NIST_ECEF = [-1288398.567 -4721696.932	4078625.350]; %Nist ecef location
 %% Question 1 Analayzing Multiple PRN Satellites
 
 PRN = [3; 4; 7; 8; 9; 16; 26; 27; 31];
-
 %Read in rinex file
 fileinfo = rinexinfo('NIST00USA_R_20262310000_01D_30S_MO.rnx');
 GPS_Data = rinexread('NIST00USA_R_20262310000_01D_30S_MO.rnx');
@@ -52,6 +51,7 @@ end
 resultsTable = table(PRN, PIF, expectedRange, AZ, EL, bsv, relCorr, tropo, ...
     'VariableNames', {'PRN','PIF (m)','ExpectedRange (m)','AZ (deg)','Elevation (deg)','BSV (m)','RELAT (m)','TROP (m)'});
 disp(resultsTable);
+table2latex(resultsTable,'Table1b.tex')
 
 %% Question 2
 

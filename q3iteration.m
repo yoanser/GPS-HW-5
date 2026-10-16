@@ -17,8 +17,8 @@ GPS_Data = rinexread('NIST00USA_R_20262310000_01D_30S_MO.rnx');
 [gps_ephem,ionoparams] = read_clean_GPSbroadcast('brdc2310.26n');
 
 %% Question 3
-ECEFGuess = lla2ecef([40 -105 1600])
-
+ECEFGuess = lla2ecef([90 0 0])
+straightLineECEF = NIST_ECEF - ECEFGuess
 guessStraightLineError = norm(ECEFGuess - NIST_ECEF) %Straght line error in meters
 
 i=0; %Init counter
@@ -76,19 +76,39 @@ end
 
 
 %Error 
-solutionQuestion3c = inv(G3b'*G3b)*G3b'*prefitResid3b
+solutionQuestion3c(:,i) = inv(G3b'*G3b)*G3b'*prefitResid3b
 
 
-postfitResid = prefitResid3b - G3b*solutionQuestion3c
+postfitResid = prefitResid3b - G3b*solutionQuestion3c(:,i)
 
-ECEFGuess(i+1,:) = ECEFGuess(i,:) + (solutionQuestion3c(1:3))'
+ECEFGuess(i+1,:) = ECEFGuess(i,:) + (solutionQuestion3c(1:3,i))'
 
 newError(i) = norm(ECEFGuess(i+1,:)-NIST_ECEF)
+normofSolution(i) = norm(solutionQuestion3c(1:3,i))
 
-if norm(solutionQuestion3c(1:3))<0.01 %Breaks while loop if error state vector is less than 1m
+if norm(solutionQuestion3c(1:3,i))<0.01 %Breaks while loop if error state vector is less than 1m
+   
     break
-end
-
-
 
 end
+
+
+
+end
+
+finalErrorVec = NIST_ECEF - ECEFGuess(end,:) 
+finalClockbias = solutionQuestion3c(end,end)
+finalPostfitresid = postfitResid
+
+
+
+NISTLLA = ecef2lla(NIST_ECEF);
+R_ECEFtoENU = ECEF2ENU(NISTLLA(1),NISTLLA(2));
+finalErrorVecENU = R_ECEFtoENU * finalErrorVec'
+
+H_ECEF = inv(G3b'*G3b);
+ 
+H_ENUSpatial = R_ECEFtoENU*H_ECEF(1:3,1:3)*R_ECEFtoENU';
+
+HDOP = sqrt(H_ENUSpatial(1,1) + H_ENUSpatial(2,2))
+VDOP = sqrt(H_ENUSpatial(3,3))
